@@ -50,10 +50,41 @@ class Freehand3DUltrasoundWidget:
       self.setup()
       self.parent.show()
 
+    self.scene = slicer.mrmlScene
+    # Module's Path
+    self.freehand3DUltrasoundDirectoryPath = slicer.modules.freehand3dultrasound.path.replace("Freehand3DUltrasound.py","")
+
+    beamModelPath = self.freehand3DUltrasoundDirectoryPath+"Resources/Models/"+"beam-model3.stl"
+    successfulLoad = slicer.util.loadModel(beamModelPath)
+    if successfulLoad == True:
+      print 'loaded'
+
+    nodes = self.scene.GetNodesByName('beam-model3') 
+    n = nodes.GetNumberOfItems()
+    for i in xrange(n):
+      self.beamModelTemplateNode = nodes.GetItemAsObject(i)
+    self.beamModelTemplateNode.SetDisplayVisibility(False)
+    displayNode = self.beamModelTemplateNode.GetDisplayNode()
+    displayNode.SetColor(1,1,0)
+
+    self.recordedTransformNodes = []
+    self.beamModelNodes = []
+    self.beamModelDisplayNodes = []
+    self.transformNode = None
+    self.transformNodeObserverTag = None
+    self.transformObserverTag= None    
+    self.transform = None
+    # Timer for connection status icon
+    self.statusTimer = qt.QTimer()
+    self.statusTimer.setInterval(100)
+    self.statusTimer.connect('timeout()', self.changeImageTrackerIcon)
+    self.recordBeanModelTimer = qt.QTimer()
+    self.recordBeanModelTimer.setInterval(200)
+    self.recordBeanModelTimer.connect('timeout()', self.recordBeamModel)
+
   def setup(self):
     # Instantiate and connect widgets ...
 
-    self.freehand3DUltrasoundDirectoryPath = slicer.modules.freehand3dultrasound.path.replace("Freehand3DUltrasound.py","")
     #
     # Reload and Test area
     #
@@ -159,48 +190,52 @@ class Freehand3DUltrasoundWidget:
     self.inputROINodeSelector.nodeTypes = ['vtkMRMLAnnotationROINode']
     inputImageTrackerQFormLayout.addRow( 'Reconstruction ROI:',self.inputROINodeSelector)
     #
-    # Status Button
+    # Icons 
     #
     self.statusRedIcon = qt.QIcon(self.freehand3DUltrasoundDirectoryPath+'/Resources/Icons/icon_DotRed.png')
     self.statusGreenIcon = qt.QIcon(self.freehand3DUltrasoundDirectoryPath+'/Resources/Icons/icon_DotGreen.png')
     self.connectIcon = qt.QIcon(self.freehand3DUltrasoundDirectoryPath+'/Resources/Icons/connect.png')
     self.disconnectIcon = qt.QIcon(self.freehand3DUltrasoundDirectoryPath+'/Resources/Icons/disconnect.png')
     self.recordIcon = qt.QIcon(self.freehand3DUltrasoundDirectoryPath+'/Resources/Icons/icon_Record.png')
+    self.pauseIcon = qt.QIcon(self.freehand3DUltrasoundDirectoryPath+'/Resources/Icons/icon_pause.png')
     self.stopIcon = qt.QIcon(self.freehand3DUltrasoundDirectoryPath+'/Resources/Icons/icon_stop.png')
     self.snapshotIcon = qt.QIcon(self.freehand3DUltrasoundDirectoryPath+'/Resources/Icons/snapshot.png')
     self.deleteIcon= qt.QIcon(self.freehand3DUltrasoundDirectoryPath+'/Resources/Icons/delete.png')
     
     #
     # reconstruction and recording buttons
-    recordAndReconstructionWidget = qt.QWidget()
-    reconstructionVBoxLayout.addWidget(recordAndReconstructionWidget)
-    recordAndReconstructionHBoxLayout = qt.QHBoxLayout(recordAndReconstructionWidget)
+    self.recordAndReconstructionWidget = qt.QWidget()
+    self.recordAndReconstructionWidget.enabled = False
+    reconstructionVBoxLayout.addWidget(self.recordAndReconstructionWidget)
+    recordAndReconstructionHBoxLayout = qt.QHBoxLayout(self.recordAndReconstructionWidget)
      
     self.startButton = qt.QPushButton("")
-    buttonSize = 50 
-    iconSize = qt.QSize(35,35)
+    buttonSize = 35 
+    iconSize = qt.QSize(25,25)
     #self.startButton.toolTip = "Tracker Status"
     self.startButton.enabled = True 
     self.startButton.setIcon(self.recordIcon)
+    self.startButton.checkable = True
     self.startButton.setMinimumHeight(buttonSize)
     self.startButton.setIconSize(iconSize)
     self.startButton.setMinimumWidth(buttonSize)
     self.startButton.setMaximumWidth(buttonSize)
     recordAndReconstructionHBoxLayout.addWidget(self.startButton)
   
-    self.stopButton = qt.QPushButton("")
-    #self.stopButton.toolTip = "Tracker Status"
-    self.stopButton.enabled = True 
-    self.stopButton.setIcon(self.stopIcon)
-    self.stopButton.setMinimumHeight(buttonSize)
-    self.stopButton.setIconSize(iconSize)
-    self.stopButton.setMinimumWidth(buttonSize)
-    self.stopButton.setMaximumWidth(buttonSize)
-    recordAndReconstructionHBoxLayout.addWidget(self.stopButton)       
+    self.pauseButton = qt.QPushButton("")
+    #self.pauseButton.toolTip = "Tracker Status"
+    self.pauseButton.enabled = False 
+    self.pauseButton.checkable = True
+    self.pauseButton.setIcon(self.pauseIcon)
+    self.pauseButton.setMinimumHeight(buttonSize)
+    self.pauseButton.setIconSize(iconSize)
+    self.pauseButton.setMinimumWidth(buttonSize)
+    self.pauseButton.setMaximumWidth(buttonSize)
+    recordAndReconstructionHBoxLayout.addWidget(self.pauseButton)       
  
     self.snapshotButton = qt.QPushButton("")
     #self.snapshotButton.toolTip = "Tracker Status"
-    self.snapshotButton.enabled = True 
+    self.snapshotButton.enabled = False 
     self.snapshotButton.setIcon(self.snapshotIcon)
     recordAndReconstructionHBoxLayout.addWidget(self.snapshotButton)
     self.snapshotButton.setMinimumHeight(buttonSize)
@@ -210,7 +245,7 @@ class Freehand3DUltrasoundWidget:
  
     self.deleteButton = qt.QPushButton("")
     #self.deleteButton.toolTip = "Tracker Status"
-    self.deleteButton.enabled = True 
+    self.deleteButton.enabled = False 
     self.deleteButton.setIcon(self.deleteIcon)
     self.deleteButton.setMinimumHeight(buttonSize)
     self.deleteButton.setIconSize(iconSize)
@@ -221,14 +256,13 @@ class Freehand3DUltrasoundWidget:
 
     self.statusButton = qt.QPushButton("")
     #self.startButton.toolTip = "Tracker Status"
-    self.statusButton.enabled = True 
+    self.statusButton.enabled = False 
     self.statusButton.setIcon(self.disconnectIcon)
     self.statusButton.setIconSize(iconSize)
     self.statusButton.setMinimumHeight(buttonSize)
     self.statusButton.setMaximumWidth(buttonSize)
     self.statusButton.setMinimumWidth(buttonSize)
     recordAndReconstructionHBoxLayout.addWidget(self.statusButton)
-    # connections
 
     #
     # Display Area
@@ -299,12 +333,12 @@ class Freehand3DUltrasoundWidget:
     #
     # Settings Area
     #
-    settingsCollapsibleButton = ctk.ctkCollapsibleButton()
-    settingsCollapsibleButton.text = "Settings"
-    self.layout.addWidget(settingsCollapsibleButton)
+    self.settingsCollapsibleButton = ctk.ctkCollapsibleButton()
+    self.settingsCollapsibleButton.text = "Settings"
+    self.layout.addWidget(self.settingsCollapsibleButton)
 
     # Layout within the dummy collapsible button
-    settingsVBoxLayout = qt.QVBoxLayout(settingsCollapsibleButton)
+    settingsVBoxLayout = qt.QVBoxLayout(self.settingsCollapsibleButton)
    
     pathWidget = qt.QWidget()
     settingsVBoxLayout.addWidget(pathWidget)
@@ -336,8 +370,159 @@ class Freehand3DUltrasoundWidget:
     # Add vertical spacer
     self.layout.addStretch(1)
 
+    #
+    # Connections
+    #
+    self.startButton.connect('toggled(bool)', self.onStartButton)
+    self.inputImageTrackerNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.setTransformNode)
+    self.deleteButton.connect('clicked(bool)',self.onDeleteButton)
+
   def cleanup(self):
     pass
+
+  def setTransformNode(self, newTransformNode):
+    """Allow to set the current Transform node. 
+    Connected to signal 'currentNodeChanged()' emitted by Transform node selector."""
+    
+    #  Remove previous observer
+    if self.transformNode and self.transformNodeObserverTag:
+      self.transformNode.RemoveObserver(self.transformNodeObserverTag)
+    if self.transform and self.transformObserverTag:
+      self.transform.RemoveObserver(self.transformObserverTag)
+    
+    newTransform = None
+    if newTransformNode:
+      newTransform = vtk.vtkMatrix4x4()
+      newTransformNode.GetMatrixTransformToWorld(newTransform)
+      # Add TransformNode ModifiedEvent observer
+      self.TransformNodeObserverTag = newTransformNode.AddObserver(slicer.vtkMRMLTransformNode.TransformModifiedEvent , self.onTransformNodeModified)
+      # Add Transform ModifiedEvent observer
+      self.transformObserverTag = newTransform.AddObserver(slicer.vtkMRMLTransformNode.TransformModifiedEvent, self.onTransformNodeModified)
+      self.transformObserverTag = newTransform.AddObserver('TransformModifiedEvent', self.onTransformModified)
+      
+    self.transformNode = newTransformNode
+    self.transform = newTransform
+    
+    # Update UI
+    self.updateWidgetFromMRML()
+
+  def updateWidgetFromMRML(self):
+
+    if self.transform:
+      
+      self.statusButton.enabled = True
+      self.recordAndReconstructionWidget.enabled = True
+      self.statusButton.setIcon(self.connectIcon)
+      self.statusTimer.start()
+      #self.acquireTimer.setInterval(self.timeSlider.value)
+      '''
+      self.currentCoordinatesLabel.setText(newLabel)
+      
+      self.collectSignal = self.pointerDisplacementDistance > self.distanceSlider.value
+        
+      if (self.acquireButtonFlag and self.collectSignal ):
+        self.pointsCounts += 1
+        logic.acquirePoints(self.activeMarkupsNode,self.pointerPosition,self.nameBase,self.pointsCounts)
+        self.recordedpoint = self.pointerPosition
+      '''
+    
+    if self.transformNode:
+      pass
+
+  def onTransformModified(self, observer, eventid):
+    self.updateWidgetFromMRML()
+    
+  def onTransformNodeModified(self, observer, eventid):
+    self.updateWidgetFromMRML()
+
+  def changeImageTrackerIcon(self):
+    self.statusButton.setIcon(self.disconnectIcon)
+
+  def onStartButton(self, toggled):
+    if toggled == True:
+      # Enable pause and snapshot buttons and disable settings collapsible button
+      print 'toggled'
+      self.pauseButton.enabled = True 
+      self.deleteButton.enabled 
+      self.snapshotButton.enabled = True 
+      self.settingsCollapsibleButton.enabled = False
+      # Send Record Command
+      
+      # Send Reconstruction Command
+
+      # Send Probe Sweep Guide Command
+      if self.probeSweepGuideCheckBox.checked:
+        self.recordBeanModelTimer.start()
+      #self.outputFileName = "TrackedImageSequence_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")+".mha"
+      #self.fileNameBox.text = self.outputFileName
+      #self.recordingButton.setText('Stop Recording')
+      self.startButton.setIcon(self.stopIcon)
+      #logic = PlusRemoteLogic()
+      #self.lastCommandId = logic.startRecording(self.linkInputSelector.currentNode().GetID(),
+      #self.captureIDBox.text, self.currentDirectory, self.outputFileName)
+      #self.setTimer()
+    else:
+      # Disable pause and snapshot buttons and enable settings collapsible button
+      self.pauseButton.enabled = False 
+      self.snapshotButton.enabled = False 
+      self.deleteButton.enabled = True
+      self.settingsCollapsibleButton.enabled = True 
+      self.startButton.setIcon(self.recordIcon)
+      self.recordBeanModelTimer.stop()
+      '''
+      logic = PlusRemoteLogic()
+      self.lastCommandId = logic.stopRecording(self.linkInputSelector.currentNode().GetID(), self.captureIDBox.text)
+      self.setTimer()
+      '''
+
+  def recordBeamModel(self):
+
+    # create a new transform with the current one
+    # TODO: harden transform?
+    # create a new transform node
+
+    '''
+    recordedTransformNode = slicer.vtkMRMLLinearTransformNode()
+    recordedTransformNode.CopyWithoutModifiedEvent(self.transformNode)
+    slicer.mrmlScene.AddNode(recordedTransformNode)
+    recordedTransformName = recordedTransformNode.GetName() + str(len(self.recordedTransformNodes))
+    recordedTransformNode.SetName(recordedTransformName)
+    self.recordedTransformNodes.append(recordedTransformNode)
+    print 'recorded transform', len(self.recordedTransformNodes)
+
+    '''
+    transformNode = self.transformNode
+    transformMatrix = vtk.vtkMatrix4x4()
+    transformNode.GetMatrixTransformToWorld(transformMatrix)
+    # create a new model and apply the transform
+    model = slicer.vtkMRMLModelNode()
+    self.beamModelNodes.append(model)
+
+    model.CopyWithoutModifiedEvent(self.beamModelTemplateNode)
+
+    modelDisplay = slicer.vtkMRMLModelDisplayNode()
+    modelDisplay.SetColor(1,1,0) # yellow
+    modelDisplay.SetScene(self.scene)
+    self.beamModelDisplayNodes.append(modelDisplay)
+    self.scene.AddNode(modelDisplay)
+    model.SetAndObserveDisplayNodeID(modelDisplay.GetID())
+     
+    # Add to scene
+    modelDisplay.SetInputPolyData(model.GetPolyData())
+    modelDisplay.SetSliceIntersectionVisibility(True)
+    self.scene.AddNode(model)
+    #model.ApplyTransformMatrix(transformMatrix)
+
+  def onDeleteButton(self):
+    for node in self.beamModelNodes:
+      slicer.mrmlScene.RemoveNode(node)
+
+    for node in self.beamModelDisplayNodes:
+      slicer.mrmlScene.RemoveNode(node)
+
+    self.beamModelNodes= []
+    self.beamModelDisplayNodes = []
+    self.deleteButton.enabled = False 
 
   def onReload(self,moduleName="Freehand3DUltrasound"):
     """Generic reload method for any scripted module.
