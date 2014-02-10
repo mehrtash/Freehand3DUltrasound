@@ -65,7 +65,8 @@ class Freehand3DUltrasoundWidget:
       self.beamModelTemplateNode = nodes.GetItemAsObject(i)
     self.beamModelTemplateNode.SetDisplayVisibility(False)
     displayNode = self.beamModelTemplateNode.GetDisplayNode()
-    displayNode.SetColor(1,1,0)
+    displayNode.SetColor(1,0,0)
+    displayNode.SetSliceIntersectionVisibility(True)
 
     self.recordedTransformNodes = []
     self.beamModelNodes = []
@@ -132,6 +133,7 @@ class Freehand3DUltrasoundWidget:
     self.connectorLayout.addRow("PlusServer Connector: ", self.linkInputSelector)    
 
     self.igtLinkWidget = qt.QWidget()
+    self.igtLinkWidget.enabled = False
     self.parametersVBoxLayout.addWidget(self.igtLinkWidget)
     self.igtLinkHBoxLayout = qt.QHBoxLayout(self.igtLinkWidget)
     self.hostNameLabel = qt.QLabel("Host Name:")
@@ -373,12 +375,35 @@ class Freehand3DUltrasoundWidget:
     #
     # Connections
     #
+    self.linkInputSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.setLink)
+    self.linkStatusCheckBox.connect('stateChanged(int)',self.onLinkStatusCheckBox)
     self.startButton.connect('toggled(bool)', self.onStartButton)
     self.inputImageTrackerNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.setTransformNode)
     self.deleteButton.connect('clicked(bool)',self.onDeleteButton)
 
   def cleanup(self):
     pass
+
+  def setLink(self, newLinkNode):
+    if newLinkNode:
+      self.igtLinkWidget.enabled = True
+      self.linkNode = newLinkNode
+    else:
+      self.igtLinkWidget.enabled = False 
+
+  def onLinkStatusCheckBox(self, status):
+    if status == 2:
+      self.hostNameLineEdit.enabled = False
+      self.portLineEdit.enabled = False
+      host = self.hostNameLineEdit.text
+      port = int(self.portLineEdit.text)
+      self.linkNode.SetTypeClient(host, port)
+      self.linkNode.Start()
+    elif status == 0:
+      self.linkNode.Stop()
+      self.hostNameLineEdit.enabled = True 
+      self.portLineEdit.enabled = True 
+
 
   def setTransformNode(self, newTransformNode):
     """Allow to set the current Transform node. 
@@ -442,6 +467,12 @@ class Freehand3DUltrasoundWidget:
     if toggled == True:
       # Enable pause and snapshot buttons and disable settings collapsible button
       print 'toggled'
+      transformNode = self.transformNode
+      transformNodeID = transformNode.GetID()
+      print transformNodeID
+      self.beamModelTemplateNode.SetAndObserveTransformNodeID(transformNodeID)
+      self.beamModelTemplateNode.SetDisplayVisibility(False)
+
       self.pauseButton.enabled = True 
       self.deleteButton.enabled 
       self.snapshotButton.enabled = True 
@@ -502,16 +533,17 @@ class Freehand3DUltrasoundWidget:
 
     modelDisplay = slicer.vtkMRMLModelDisplayNode()
     modelDisplay.SetColor(1,1,0) # yellow
+    modelDisplay.SetVisibility(True)
+    modelDisplay.SetOpacity(0.1)
     modelDisplay.SetScene(self.scene)
     self.beamModelDisplayNodes.append(modelDisplay)
     self.scene.AddNode(modelDisplay)
     model.SetAndObserveDisplayNodeID(modelDisplay.GetID())
      
     # Add to scene
-    modelDisplay.SetInputPolyData(model.GetPolyData())
+    #modelDisplay.SetInputPolyData(model.GetPolyData())
     modelDisplay.SetSliceIntersectionVisibility(True)
     self.scene.AddNode(model)
-    #model.ApplyTransformMatrix(transformMatrix)
 
   def onDeleteButton(self):
     for node in self.beamModelNodes:
