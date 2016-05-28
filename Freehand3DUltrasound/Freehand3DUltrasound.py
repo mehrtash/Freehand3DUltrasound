@@ -1,5 +1,6 @@
 import os
 import unittest
+import datetime
 from __main__ import vtk, qt, ctk, slicer
 
 #
@@ -49,6 +50,8 @@ class Freehand3DUltrasoundWidget:
     if not parent:
       self.setup()
       self.parent.show()
+
+    self.currentDirectory = '.'
 
     self.scene = slicer.mrmlScene
     # Module's Path
@@ -380,6 +383,7 @@ class Freehand3DUltrasoundWidget:
     self.startButton.connect('toggled(bool)', self.onStartButton)
     self.inputImageTrackerNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.setTransformNode)
     self.deleteButton.connect('clicked(bool)',self.onDeleteButton)
+    self.directoryButton.connect('directoryChanged(const QString &)',self.onDirectoryButton)
 
   def cleanup(self):
     pass
@@ -390,6 +394,10 @@ class Freehand3DUltrasoundWidget:
       self.linkNode = newLinkNode
     else:
       self.igtLinkWidget.enabled = False 
+
+  def onDirectoryButton(self):
+    self.currentDirectory = self.directoryButton.directory
+    print self.currentDirectory
 
   def onLinkStatusCheckBox(self, status):
     if status == 2:
@@ -464,12 +472,11 @@ class Freehand3DUltrasoundWidget:
     self.statusButton.setIcon(self.disconnectIcon)
 
   def onStartButton(self, toggled):
+    logic = Freehand3DUltrasoundLogic()
     if toggled == True:
       # Enable pause and snapshot buttons and disable settings collapsible button
-      print 'toggled'
       transformNode = self.transformNode
       transformNodeID = transformNode.GetID()
-      print transformNodeID
       self.beamModelTemplateNode.SetAndObserveTransformNodeID(transformNodeID)
       self.beamModelTemplateNode.SetDisplayVisibility(False)
 
@@ -478,6 +485,13 @@ class Freehand3DUltrasoundWidget:
       self.snapshotButton.enabled = True 
       self.settingsCollapsibleButton.enabled = False
       # Send Record Command
+      if self.recordTrackedFramesCheckBox.checked:
+        self.outputFileName = "TrackedImageSequence_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")+".mha"
+        self.captureIDBox = qt.QLineEdit()
+        print self.outputFileName
+        self.lastCommandId = logic.startRecording(self.linkInputSelector.currentNode().GetID(),
+          self.captureIDBox.text, self.currentDirectory, self.outputFileName) 
+
       
       # Send Reconstruction Command
 
@@ -587,6 +601,38 @@ class Freehand3DUltrasoundLogic:
   """
   def __init__(self):
     pass
+  
+  def startVolumeReconstuction(self, connectorNodeId):
+    #parameters = "VolumeReconstructorDeviceId=" + "\"" 
+    parameters = ""
+    commandCounter = slicer.modules.openigtlinkremote.logic().ExecuteCommand(connectorNodeId, "StartVolumeReconstruction", parameters)
+    return commandCounter
+  
+  #def stopVolumeReconstruction(self, volumeReconstructorDeviceId, ouputVolDeviceName, ouputVolFileName): 
+  def stopVolumeReconstruction(self, connectorNodeId):
+    #parameters = "VolumeReconstructorDeviceID=" + "\"" + volumeReconstructorDeviceId + "OutputVolumeDeviceName" + "\"" + "OutputVolFileName" + "\"" + outputVolFileName
+    parameters = ""
+    commandCounter = slicer.modules.openigtlinkremote.logic().ExecuteCommand(connectorNodeId, "StopVolumeReconstruction", parameters)
+    return commandCounter
+  
+  def reconstructRecorded(self, connectorNodeId, directory, fileName, reconstructionOutputFileName):
+    parameters = "InputSeqFilename=" + "\"" + directory + "/" + fileName + "\""+ " OutputVolFilename=" + "\"" + directory + "/"+ reconstructionOutputFileName+"\""
+    commandCounter = slicer.modules.openigtlinkremote.logic().ExecuteCommand(connectorNodeId, "ReconstructVolume", parameters)
+    return commandCounter
+  
+  def startRecording(self, connectorNodeId, captureName, directory, outputFileName):
+    parameters = "CaptureDeviceID=" + "\"" + captureName + "\"" + " OutputFilename=" + "\""  + directory + "/"+ outputFileName + "\""
+    commandCounter = slicer.modules.openigtlinkremote.logic().ExecuteCommand(
+        connectorNodeId, "StartRecording", parameters)
+    return commandCounter
+  
+  def stopRecording(self, connectorNodeId, captureName):
+    commandCounter = slicer.modules.openigtlinkremote.logic().ExecuteCommand(
+        connectorNodeId, "StopRecording", "CaptureDeviceID=" + "\"" + captureName + "\"")
+    return commandCounter
+
+  def discardCommand(self, commandId, connectorNodeId):
+    slicer.modules.openigtlinkremote.logic().DiscardCommand(commandId, connectorNodeId)
 
 
 class Freehand3DUltrasoundTest(unittest.TestCase):
